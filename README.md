@@ -1,4 +1,4 @@
-# scMTG: cell state transition and dynamic regulation analysis for single-cell time-series data
+# scMTG learns generative Markov transitions for single-cell temporal dynamics
 
 ![](docs/scMTG.png)
 
