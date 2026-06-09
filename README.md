@@ -21,6 +21,10 @@ $ git clone https://github.com//liuq-lab/scMTG.git
 We provide a quick-start notebook for the training, evaluation and analysis of scMTG.
 
 
+## Citation
+Xuejian Cui, Haochen Wang, Zijing Gao, Rui Jiang#, Wing Hung Wong#, Qiao Liu#. scMTG reconstructs single-cell temporal dynamics with Markov transition generators. bioRxiv, (2026).<https://doi.org/10.64898/2026.06.04.730241>
+
+
 ## Contact 
 If you have any questions, you can contact me from the email: <cuixj19@tsinghua.org.cn>
 
