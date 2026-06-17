@@ -1,6 +1,6 @@
 # scMTG learns generative Markov transitions for single-cell temporal dynamics
 
-![](docs/scMTG.png)
+![](data/scMTG.png)
 
 ## Installation  
 
@@ -18,7 +18,7 @@ $ git clone https://github.com//liuq-lab/scMTG.git
 ```
 
 ## Tutorial
-We provide a quick-start notebook for the training, evaluation and analysis of scMTG.
+We provide a [quick-start notebook](https://github.com/liuq-lab/scMTG/blob/main/scMTG_demo.ipynb) for the training, evaluation and analysis of scMTG.
 
 
 ## Citation
