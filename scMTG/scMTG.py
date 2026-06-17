@@ -10,14 +10,9 @@ import sys
 import copy
 import os
 import json
-#tf.keras.utils.set_random_seed(123)
-#os.environ['TF_DETERMINISTIC_OPS'] = '1'
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "7"
-
-gpus = tf.config.experimental.list_physical_devices('GPU')
-tf.config.experimental.set_memory_growth(gpus[0], True)
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 class scMTG(object):
     """Markov Transition Generative model for time-series single cell analysis.
@@ -55,21 +50,15 @@ class scMTG(object):
         if self.timestamp is None:
             now = datetime.datetime.now(dateutil.tz.tzlocal())
             self.timestamp = now.strftime('%Y%m%d_%H%M%S')
-        
-        self.checkpoint_path = "{}/checkpoint/{}/{}".format(
-            params['output_dir'], params['dataset'], self.timestamp)
-
-        if self.params['save_model'] and not os.path.exists(self.checkpoint_path):
-            os.makedirs(self.checkpoint_path)
             
-        self.best_path = "{}/{}/{}/best_model/".format(
-            params['output_dir'], params['dataset'], self.timestamp)
+        self.best_path = "{}/{}/best_model/".format(
+            params['output_dir'], self.timestamp)
 
         if self.params['save_model'] and not os.path.exists(self.best_path):
             os.makedirs(self.best_path)
         
-        self.save_dir = "{}/{}/{}".format(
-            params['output_dir'], params['dataset'], self.timestamp)
+        self.save_dir = "{}/{}".format(
+            params['output_dir'], self.timestamp)
 
         if self.params['save_res'] and not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)   
@@ -82,12 +71,6 @@ class scMTG(object):
                                    e_optimizer = self.e_optimizer,
                                    g_optimizer = self.g_optimizer,
                                    d_optimizer = self.d_optimizer)
-        self.ckpt_manager = tf.train.CheckpointManager(self.ckpt, self.checkpoint_path, max_to_keep=3)                 
-
-        if self.ckpt_manager.latest_checkpoint:
-            self.ckpt.restore(self.ckpt_manager.latest_checkpoint)
-            print ('Latest checkpoint restored!!') 
-
 
     def get_config(self):
         return {
@@ -211,20 +194,18 @@ class scMTG(object):
         self.d_optimizer.apply_gradients(zip(d_gradients, sum([item.trainable_variables for item in self.discriminators], [])))
         return loss_d, loss_gp, loss_d_total
 
-    def train(self, data, batch_size=32, n_iter=30000, batches_per_eval=500, batches_per_save=100000, verbose=1):
+    def train(self, data, weights, batch_size=32, n_iter=100000, batches_per_verbose=500, verbose=1):
         if self.params['save_res']:
             f_params = open('{}/params.txt'.format(self.save_dir),'w')
             f_params.write(str(self.params))
             f_params.close()
-        self.data_sampler = Sequential_sampler(data=data,batch_size=batch_size)
+        self.data_sampler = Sequential_sampler(data=data, weights=weights, batch_size=batch_size)
         
-#         best_loss = float('inf')
-#         best_ckpt = None
-#         best_batch_idx = 0
+        best_loss = float('inf')
+        best_ckpt = None
+        best_batch_idx = 0
         loss_pd = []
         for batch_idx in range(n_iter+1):
-#             if batch_idx % 5000 == 0:
-#                 self.data_sampler = Sequential_sampler(data=data, batch_size=batch_size, random_seed=batch_idx)
             batch_data_series = self.data_sampler.next_batch()
 
             #train autoencoders
@@ -241,27 +222,24 @@ class scMTG(object):
             
             loss_total = loss_rec + loss_g_total + loss_d_total
             loss_pd.append([batch_idx, loss_total.numpy(), loss_rec.numpy(), loss_gp.numpy(), loss_d.numpy(), loss_g.numpy(), loss_td.numpy()])
-#             if loss_total < best_loss:
-#                 best_loss = loss_total
-#                 best_ckpt = self.ckpt
-#                 best_batch_idx = batch_idx
-#             if batch_idx - best_batch_idx >= 10000 and batch_idx >= 50000:
-#                 print("Early stop at {} and best at {}!".format(batch_idx, best_batch_idx))
-#                 break
+            if loss_total < best_loss:
+                best_loss = loss_total
+                best_ckpt = self.ckpt
+                best_batch_idx = batch_idx
+                self.ckpt.save('{}/{}/best_model'.format(self.best_path, batch_idx))
+            if batch_idx - best_batch_idx >= 10000 and batch_idx >= 50000:
+                print("Early stop at {} and best at {}!".format(batch_idx, best_batch_idx))
+                break
                 
-            if batch_idx % batches_per_eval == 0:
+            if batch_idx % batches_per_verbose == 0:
                 loss_contents = '''Iteration [%d] : loss_t [%.4f], loss_rec [%.4f], loss_gp [%.4f], loss_d [%.4f], loss_g [%.4f] loss_td [%.4f]''' \
                 %(batch_idx, loss_total, loss_rec, loss_gp, loss_d, loss_g, loss_td)
                 if verbose:
                     print(loss_contents)
-#                 self.evaluate(self.data_sampler.load_all(), batch_idx)
-            if batch_idx % batches_per_save == 0:
-                os.makedirs('{}/{}/'.format(self.best_path, batch_idx), exist_ok=True)
-                self.ckpt.save('{}/{}/best_model'.format(self.best_path, batch_idx))
         loss_pd = pd.DataFrame(loss_pd, columns=['batch_idx', 'loss_total', 'loss_rec', 'loss_gp', 'loss_d', 'loss_g', 'loss_td'])
         loss_pd.to_csv(self.save_dir+'/loss_pd.csv', sep = '\t', index = False)
-        self.ckpt.save('{}/best_model_at_{}'.format(self.best_path, batch_idx))
-#         self.ckpt.restore(tf.train.latest_checkpoint('{}/best_model_at_{}'.format(self.best_path, best_batch_idx)))
+#         self.ckpt.save('{}/best_model_at_{}'.format(self.best_path, batch_idx))
+        self.ckpt.restore(tf.train.latest_checkpoint('{}/best_model_at_{}'.format(self.best_path, best_batch_idx)))
         self.evaluate(self.data_sampler.load_all(), 'best')
     
     def evaluate(self, data_series, batch_idx):
@@ -274,27 +252,22 @@ class scMTG(object):
         np.savez('{}/data_gen_at_{}.npz'.format(self.save_dir, batch_idx),data_gen_z)
         np.savez('{}/data_gen_org_at_{}.npz'.format(self.save_dir, batch_idx),data_gen_org)
 
-    def compute_trans_mat_all(self, data_series, n_noise=10000, n_chunk=1000, random_seed=1):
-#         data_series = self.data_sampler.load_all()
-        embed_series = [self.encoder.predict(item) for item in data_series]
-        
-        tf.random.set_seed(random_seed)
-        noises = tf.random.normal(shape=(n_noise, self.params['noise_dim']), mean=0.0, stddev=self.params['sd'])
+    def thresholding_(self, trans_mtx):
+        trans_mtx2 = trans_mtx / np.sum(trans_mtx, axis=1, keepdims=True)
+        trans_mtx2[np.isnan(trans_mtx2)] = 0.0
 
-        for times in range(len(data_series)-1):
-            embed_data = embed_series[times]
-            trans_mtx = []
-            const = -0.5 / (self.params['sd'] ** 2)
-            for embed_data0 in embed_data:
-                embed_gen1 = self.generators[times].predict(tf.concat([tf.tile(tf.reshape(embed_data0,(1,-1)),[n_noise,1]),noises], axis=-1))
-                trans2 = []
-                for i in range(n_noise//n_chunk):
-                    trans2.append(tf.reduce_mean(tf.math.exp(const*tf.reduce_sum((tf.reshape(tf.tile(embed_series[times+1], [1,n_chunk]), [embed_series[times+1].shape[0],-1,embed_series[times+1].shape[1]])-embed_gen1[i*n_chunk:(i+1)*n_chunk])**2,axis=-1)),axis=-1))
-                trans_mtx.append(tf.reduce_mean(trans2, axis=0))
-            np.savez('{}/trans_mtx_{}.npz'.format(self.save_dir, times),t1=trans_mtx)
+        trans_mtx0 = trans_mtx2[np.where(np.sum(trans_mtx2, axis=1)>0)[0]]
+        thresh = min(trans_mtx0[i].max() for i in range(trans_mtx0.shape[0]))
+#         print(thresh)
+
+        trans_mtx3 = trans_mtx2.copy()
+        trans_mtx3[trans_mtx3<thresh] = 0.0
+        trans_mtx3 = trans_mtx3 / np.sum(trans_mtx3, axis=1, keepdims=True)
+        trans_mtx3[np.isnan(trans_mtx3)] = 0.0
+        return trans_mtx3
     
-    def compute_trans_mat(self, data_series, times=1, n_noise=10000, n_chunk=1000, random_seed=1, save_mtx=True):
-#         data_series = self.data_sampler.load_all()
+    def compute_trans_mat(self, times=1, n_noise=1000, n_chunk=1000, random_seed=1, thresholding=True, save_mtx=False):
+        data_series = self.data_sampler.load_all()
         embed_series = [self.encoder.predict(item) for item in data_series]
         
         tf.random.set_seed(random_seed)
@@ -309,8 +282,14 @@ class scMTG(object):
             for i in range(n_noise//n_chunk):
                 trans2.append(tf.reduce_mean(tf.math.exp(const*tf.reduce_sum((tf.reshape(tf.tile(embed_series[times+1], [1,n_chunk]), [embed_series[times+1].shape[0],-1,embed_series[times+1].shape[1]])-embed_gen1[i*n_chunk:(i+1)*n_chunk])**2,axis=-1)),axis=-1))
             trans_mtx.append(tf.reduce_mean(trans2, axis=0))
+        trans_mtx = np.array(trans_mtx)
+        
+        if thresholding:
+            trans_mtx = self.thresholding_(trans_mtx)
             
         if save_mtx:
             np.savez('{}/trans_mtx_{}.npz'.format(self.save_dir, times),t1=trans_mtx)
         return trans_mtx
 
+    
+    
