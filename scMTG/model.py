@@ -3,13 +3,12 @@ import tensorflow as tf
 import tensorflow.keras.backend as K
 from keras.layers import Lambda, Layer
 
-# MeanAct = lambda x: tf.clip_by_value(K.exp(x), 0, 1e4)
 MeanAct = lambda x: tf.clip_by_value(tf.nn.softplus(x), 0, 1e4)
 DispAct = lambda x: tf.clip_by_value(tf.nn.softplus(x), 1e-4, 1e4)
 
 
 class BaseFullyConnectedNet(tf.keras.Model):
-    """ Generator network.
+    """ Encoder network.
     """
     def __init__(self, input_dim, z_dim, output_dim, model_name, nb_units=[256], concat_every_fcl=False, batchnorm=False, dropout=True, last_relu=False):  
         super(BaseFullyConnectedNet, self).__init__()
