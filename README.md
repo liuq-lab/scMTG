@@ -16,7 +16,7 @@ Package installation:
 
 pip install git+https://github.com//liuq-lab/scMTG.git
 or
-pip install castle       
+pip install scmtg       
 ```
 
 ## Tutorial
