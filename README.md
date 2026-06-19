@@ -14,7 +14,9 @@ Requiements:
   
 Package installation:
 
-$ git clone https://github.com//liuq-lab/scMTG.git       
+pip install git+https://github.com//liuq-lab/scMTG.git
+or
+pip install castle       
 ```
 
 ## Tutorial
