@@ -30,9 +30,11 @@ def growth_rate(adata, proliferation_key="proliferation", apoptosis_key="apoptos
     return gr
 
 class Sequential_sampler(object):
-    def __init__(self, data, weights=None, batch_size=32, random_seed=123):
+    def __init__(self, datas, weights=None, batch_size=32, random_seed=123):
         np.random.seed(random_seed)
-        self.data = [np.array(item, dtype='float32') for item in data]
+        self.data = [np.array(item[0], dtype='float32') for item in datas]
+        self.count = [np.array(item[1], dtype='float32') for item in datas]
+        self.lib_size = [np.array(item[1], dtype='float32').sum(axis=1, keepdims=True) for item in datas]
         self.nb_time = len(self.data)
         self.batch_size = batch_size
         self.sample_sizes = [item.shape[0] for item in self.data]
@@ -47,16 +49,16 @@ class Sequential_sampler(object):
 #             indices = np.random.choice(sample_size, size=self.batch_size, replace=True, p=self.weights[time_idx])
             indices = np.random.choice(sample_size, size=self.batch_size, replace=False, p=self.weights[time_idx])
             yield indices
-#             indices = np.random.choice(sample_size, size=3*self.batch_size, replace=False, p=self.weights[time_idx])
-#             np.random.shuffle(indices)
-#             yield indices[:self.batch_size]
 
     def next_batch(self):
         indexes = [next(item) for item in self.idx_gens]
-        return np.stack([item[indexes[i],:] for i,item in enumerate(self.data)])
+        x_batch = np.stack([item[indexes[i],:] for i,item in enumerate(self.data)])
+        count_batch = np.stack([item[indexes[i],:] for i,item in enumerate(self.count)])
+        lib_batch = np.stack([item[indexes[i],:] for i,item in enumerate(self.lib_size)])
+        return x_batch, count_batch, lib_batch
     
     def load_all(self):
-        return self.data
+        return self.data, self.count, self.lib_size
 
 def interpolate(p0, p1, tmap, interp_frac, size, seed=1):
     p0 = p0.toarray() if scipy.sparse.isspmatrix(p0) else p0
