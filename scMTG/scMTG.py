@@ -12,7 +12,7 @@ import os
 import json
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 class scMTG(object):
     """Markov Transition Generative model for time-series single cell analysis.
@@ -28,7 +28,7 @@ class scMTG(object):
         self.encoder = BaseFullyConnectedNet(input_dim=params['e_dim'],z_dim=params['z_dim'],output_dim = params['z_dim'], 
                                         model_name='e_net', nb_units=params['e_units'], last_relu=False)
         self.decoder = Decoder2(input_dim=params['z_dim'],z_dim=params['z_dim'],output_dim = params['e_dim'],
-                               model_name='d_net', nb_units=params['d_units'], last_relu=False)
+                               model_name='d_net', nb_units=params['d_units'])
 
         #initilize the T-1 Markov generators and T-1 discriminators
         self.generators = [Generator(input_dim=params['noise_dim']+params['z_dim'],z_dim=params['z_dim'],
@@ -93,7 +93,7 @@ class scMTG(object):
             print([self.discriminators[i].summary() for i in range(self.params['nb_time']-1)])
 
     @tf.function
-    def train_ae_step(self, data_series):
+    def train_ae_step(self, data_series, count_series, lib_series):
         """train shared AE.
         """  
         with tf.GradientTape(persistent=True) as tape:
@@ -101,11 +101,12 @@ class scMTG(object):
             
             disps, means = [], []
             for i in range(len(embed_series)):
-                disp, mean = self.decoder(embed_series[i])
+                disp, freq = self.decoder(embed_series[i])
+                mean = freq * lib_series[i]
                 disps.append(disp)
                 means.append(mean)
-            zinb = NB(theta=tf.concat(disps, axis=0), debug=False)
-            loss_rec = zinb.loss(tf.reshape(data_series, [-1, data_series.shape[-1]]), tf.concat(means, axis=0), mean=True)
+            nb = NB(theta=tf.concat(disps, axis=0), debug=False)
+            loss_rec = nb.loss(tf.reshape(count_series, [-1, count_series.shape[-1]]), tf.concat(means, axis=0), mean=True)
     
         # Calculate the gradients
         gradients = tape.gradient(loss_rec, self.encoder.trainable_variables+self.decoder.trainable_variables)
@@ -194,30 +195,30 @@ class scMTG(object):
         self.d_optimizer.apply_gradients(zip(d_gradients, sum([item.trainable_variables for item in self.discriminators], [])))
         return loss_d, loss_gp, loss_d_total
 
-    def train(self, data, weights, batch_size=32, n_iter=100000, batches_per_verbose=500, verbose=1):
+    def train(self, datas, weights, batch_size=32, n_iter=100000, batches_per_verbose=500, verbose=1):
         if self.params['save_res']:
             f_params = open('{}/params.txt'.format(self.save_dir),'w')
             f_params.write(str(self.params))
             f_params.close()
-        self.data_sampler = Sequential_sampler(data=data, weights=weights, batch_size=batch_size)
+        self.data_sampler = Sequential_sampler(datas=datas, weights=weights, batch_size=batch_size)
         
         best_loss = float('inf')
         best_ckpt = None
         best_batch_idx = 0
         loss_pd = []
         for batch_idx in range(n_iter+1):
-            batch_data_series = self.data_sampler.next_batch()
+            batch_data_series, batch_count_series, batch_lib_series = self.data_sampler.next_batch()
 
             #train autoencoders
-            loss_rec = self.train_ae_step(batch_data_series)
+            loss_rec = self.train_ae_step(batch_data_series, batch_count_series, batch_lib_series)
 
             #control the update frequency of autoencoder vs GAN
             if batch_idx % self.params['ae_gan_freq'] == 0:
                 #update G once and update D multiple times for WGAN-GP
                 for _ in range(self.params['g_d_freq']):
-                    batch_data_series = self.data_sampler.next_batch()
+                    batch_data_series, _, _ = self.data_sampler.next_batch()
                     loss_d, loss_gp, loss_d_total = self.train_disc_step(batch_data_series)
-                batch_data_series = self.data_sampler.next_batch()
+                batch_data_series, _, _ = self.data_sampler.next_batch()
                 loss_g, loss_td, loss_g_total = self.train_gen_step(batch_data_series)
             
             loss_total = loss_rec + loss_g_total + loss_d_total
@@ -240,13 +241,13 @@ class scMTG(object):
         loss_pd.to_csv(self.save_dir+'/loss_pd.csv', sep = '\t', index = False)
 #         self.ckpt.save('{}/best_model_at_{}'.format(self.best_path, batch_idx))
         self.ckpt.restore(tf.train.latest_checkpoint('{}/best_model_at_{}'.format(self.best_path, best_batch_idx)))
-        self.evaluate(self.data_sampler.load_all(), 'best')
+        self.evaluate(self.data_sampler.load_all()[0], 'best')
     
     def evaluate(self, data_series, batch_idx):
         embed_series = [self.encoder.predict(item) for item in data_series]
         data_previous = [np.concatenate([data, np.random.normal(0.,self.params['sd'],size=(data.shape[0],self.params['noise_dim']))],axis=1) for data in embed_series[:-1]] #contain T-1 time points
         data_gen_z = [self.generators[i].predict(data) for i,data in enumerate(data_previous)]
-        data_gen_org = [self.decoder.predict(item)[-1] for item in data_gen_z]
+        data_gen_org = [np.log1p(3000 * self.decoder.predict(item)[-1]) for item in data_gen_z] # normalize_total(*, target_sum=3000)
         
         np.savez('{}/data_embed_at_{}.npz'.format(self.save_dir, batch_idx),embed_series)
         np.savez('{}/data_gen_at_{}.npz'.format(self.save_dir, batch_idx),data_gen_z)
@@ -267,7 +268,7 @@ class scMTG(object):
         return trans_mtx3
     
     def compute_trans_mat(self, times=1, n_noise=1000, n_chunk=1000, random_seed=1, thresholding=True, save_mtx=False):
-        data_series = self.data_sampler.load_all()
+        data_series = self.data_sampler.load_all()[0]
         embed_series = [self.encoder.predict(item) for item in data_series]
         
         tf.random.set_seed(random_seed)
