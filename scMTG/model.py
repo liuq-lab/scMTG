@@ -78,7 +78,7 @@ class BaseFullyConnectedNet(tf.keras.Model):
 class Decoder2(tf.keras.Model):
     """ Decoder network.
     """
-    def __init__(self, input_dim, z_dim, output_dim, model_name, nb_units=[256], batchnorm=False, dropout=True, last_relu=False):  
+    def __init__(self, input_dim, z_dim, output_dim, model_name, nb_units=[256], batchnorm=False, dropout=True):  
         super(Decoder2, self).__init__()
         self.input_layer = tf.keras.layers.Input((input_dim,))
         self.input_dim = input_dim
@@ -88,7 +88,6 @@ class Decoder2(tf.keras.Model):
         self.nb_units = nb_units
         self.batchnorm = batchnorm
         self.dropout = dropout
-        self.last_relu = last_relu
         self.all_layers = []
         """ Builds the FC stacks. """
         for i in range(len(nb_units)):
@@ -109,24 +108,17 @@ class Decoder2(tf.keras.Model):
 #             kernel_initializer='glorot_uniform', 
             name='dispersion'
         )
-        mean_layer = tf.keras.layers.Dense(
+        freq_layer = tf.keras.layers.Dense(
             units=self.output_dim, 
-            activation=MeanAct, 
+            activation=None, 
 #             kernel_initializer='glorot_uniform', 
-            name='mean'
+            name='frequency'
         )
-        self.all_layers.append([disp_layer, mean_layer])
+        self.all_layers.append([disp_layer, freq_layer])
         
-        self.disp, self.mean = self.call(self.input_layer)
+        self.disp, self.freq = self.call(self.input_layer)
 
     def call(self, inputs, training=True):
-        """ Return the output of the Generator.
-        Args:
-            inputs: tensor with shape [batch_size, input_dim]
-        Returns:
-            Output of Generator.
-            float32 tensor with shape [batch_size, output_dim]
-        """
         for i, layers in enumerate(self.all_layers[:-1]):
             # Run inputs through the sublayers.
             fc_layer, norm_layer, dropout_layer, act_layer = layers
@@ -137,14 +129,16 @@ class Decoder2(tf.keras.Model):
                 if self.dropout:
                     x = dropout_layer(x)
                 x = act_layer(x)
-        disp_layer, mean_layer = self.all_layers[-1]
+        disp_layer, freq_layer = self.all_layers[-1]
         with tf.name_scope("%s_layer_output" % self.model_name):
             disp = disp_layer(x)
-            mean = mean_layer(x)
-            # No activation func at last layer
-            if self.last_relu:
-                mean = tf.keras.layers.ReLU()(mean)
-        return disp, mean
+            freq_logits = freq_layer(x)
+            freq = tf.nn.softmax(
+                freq_logits,
+                axis=-1,
+                name="gene_frequency",
+            )
+        return disp, freq
     
 class Generator(tf.keras.Model):
     """Generator network.
@@ -276,3 +270,4 @@ class Discriminator(tf.keras.Model):
             if self.last_relu:
                 output = tf.keras.layers.ReLU()(output)
         return output
+        
