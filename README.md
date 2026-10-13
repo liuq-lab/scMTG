@@ -1,4 +1,4 @@
-# scMTG learns generative Markov transitions for single-cell temporal dynamics
+# scMTG reconstructs single-cell temporal dynamics with Markov transition generators
 
 ![](data/scMTG.png)
 
